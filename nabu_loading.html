@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NABU — System Boot</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --blue: #4a90e2;
+    --blue-bright: #6fb3ff;
+    --blue-dim: #1a3a6e;
+    --cyan: #00d4ff;
+    --cyan-dim: #003344;
+    --bg: #010812;
+    --panel: rgba(10, 25, 60, 0.7);
+    --border: rgba(74, 144, 226, 0.35);
+    --text: #8ab8e8;
+    --text-bright: #c8e0ff;
+    --glow: 0 0 20px rgba(74, 144, 226, 0.6), 0 0 40px rgba(74, 144, 226, 0.2);
+    --glow-cyan: 0 0 20px rgba(0, 212, 255, 0.7), 0 0 60px rgba(0, 212, 255, 0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text);
+    min-height: 100vh;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(74, 144, 226, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(74, 144, 226, 0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    z-index: 0;
+  }
+
+  /* Radial glow center */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px;
+    height: 800px;
+    background: radial-gradient(ellipse, rgba(74, 144, 226, 0.08) 0%, transparent 70%);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* Scan line effect */
+  .scanlines {
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* Moving scan beam */
+  .scan-beam {
+    position: fixed;
+    left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), rgba(0, 212, 255, 0.8), rgba(0, 212, 255, 0.4), transparent);
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.6);
+    z-index: 2;
+    animation: scanBeam 4s linear infinite;
+    top: -3px;
+  }
+
+  @keyframes scanBeam {
+    0% { top: -3px; opacity: 0; }
+    5% { opacity: 1; }
+    95% { opacity: 1; }
+    100% { top: 100vh; opacity: 0; }
+  }
+
+  /* Main container */
+  .container {
+    position: relative;
+    z-index: 10;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+
+  /* Corner decorations */
+  .corner {
+    position: fixed;
+    width: 80px;
+    height: 80px;
+    z-index: 5;
+  }
+  .corner::before, .corner::after {
+    content: '';
+    position: absolute;
+    background: var(--blue);
+    box-shadow: var(--glow);
+  }
+  .corner::before { width: 100%; height: 2px; top: 0; }
+  .corner::after { width: 2px; height: 100%; top: 0; }
+  .corner.tl { top: 20px; left: 20px; }
+  .corner.tr { top: 20px; right: 20px; transform: scaleX(-1); }
+  .corner.bl { bottom: 20px; left: 20px; transform: scaleY(-1); }
+  .corner.br { bottom: 20px; right: 20px; transform: scale(-1); }
+
+  /* Corner blip dots */
+  .corner.tl::before { box-shadow: 8px 0 0 var(--cyan), var(--glow); }
+  .corner.tr::before { box-shadow: 8px 0 0 var(--cyan), var(--glow); }
+
+  /* HUD frame lines */
+  .hud-line {
+    position: fixed;
+    background: var(--border);
+    z-index: 4;
+  }
+  .hud-line.top { top: 60px; left: 120px; right: 120px; height: 1px; }
+  .hud-line.bottom { bottom: 60px; left: 120px; right: 120px; height: 1px; }
+  .hud-line.left { left: 60px; top: 120px; bottom: 120px; width: 1px; }
+  .hud-line.right { right: 60px; top: 120px; bottom: 120px; width: 1px; }
+
+  /* NABU Logo SVG */
+  .logo-wrap {
+    position: relative;
+    width: 160px;
+    height: 190px;
+    margin-bottom: 28px;
+    animation: logoAppear 1s ease-out forwards;
+    opacity: 0;
+  }
+
+  @keyframes logoAppear {
+    0% { opacity: 0; transform: scale(0.5) rotate(-10deg); filter: blur(20px); }
+    60% { opacity: 1; transform: scale(1.08) rotate(2deg); filter: blur(0); }
+    100% { opacity: 1; transform: scale(1) rotate(0deg); filter: blur(0); }
+  }
+
+  .logo-svg {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 12px rgba(74, 144, 226, 0.9)) drop-shadow(0 0 30px rgba(74, 144, 226, 0.4));
+    animation: logoPulse 3s ease-in-out infinite 1s;
+  }
+
+  @keyframes logoPulse {
+    0%, 100% { filter: drop-shadow(0 0 12px rgba(74, 144, 226, 0.9)) drop-shadow(0 0 30px rgba(74, 144, 226, 0.4)); }
+    50% { filter: drop-shadow(0 0 20px rgba(0, 212, 255, 1)) drop-shadow(0 0 60px rgba(0, 212, 255, 0.5)); }
+  }
+
+  /* Orbiting rings */
+  .orbit-ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    border-radius: 50%;
+    border: 1px solid rgba(74, 144, 226, 0.25);
+    transform: translate(-50%, -50%);
+  }
+  .orbit-ring::after {
+    content: '';
+    position: absolute;
+    width: 6px; height: 6px;
+    background: var(--cyan);
+    border-radius: 50%;
+    box-shadow: var(--glow-cyan);
+    top: -3px; left: 50%;
+    transform: translateX(-50%);
+  }
+  .orbit-ring.r1 {
+    width: 200px; height: 200px;
+    animation: orbit 8s linear infinite;
+  }
+  .orbit-ring.r2 {
+    width: 250px; height: 130px;
+    border-color: rgba(0, 212, 255, 0.15);
+    animation: orbit 5s linear infinite reverse;
+    transform: translate(-50%, -50%) rotateX(60deg);
+  }
+
+  @keyframes orbit {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+
+  /* Title block */
+  .title-block {
+    text-align: center;
+    animation: fadeUp 0.8s ease-out 0.5s forwards;
+    opacity: 0;
+    margin-bottom: 40px;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 56px;
+    font-weight: 900;
+    letter-spacing: 18px;
+    color: var(--blue-bright);
+    text-shadow: 0 0 30px rgba(74, 144, 226, 0.8), 0 0 80px rgba(74, 144, 226, 0.3);
+    position: relative;
+  }
+
+  .title::after {
+    content: 'NABU';
+    position: absolute;
+    inset: 0;
+    color: transparent;
+    -webkit-text-stroke: 1px rgba(0, 212, 255, 0.3);
+    letter-spacing: 18px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    letter-spacing: 6px;
+    color: var(--text);
+    text-transform: uppercase;
+    margin-top: 8px;
+    opacity: 0.7;
+  }
+
+  /* Main progress panel */
+  .progress-panel {
+    width: 560px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    padding: 28px 32px;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+    animation: fadeUp 0.8s ease-out 0.7s forwards;
+    opacity: 0;
+  }
+
+  .progress-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(74, 144, 226, 0.05) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  /* Corner accents on panel */
+  .panel-corner {
+    position: absolute;
+    width: 12px; height: 12px;
+    border-color: var(--cyan);
+    border-style: solid;
+  }
+  .panel-corner.tl { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+  .panel-corner.br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+  /* Status label */
+  .status-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan);
+    animation: blink 1s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  .status-text {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--cyan);
+    text-transform: uppercase;
+    flex: 1;
+  }
+
+  .status-pct {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--blue-bright);
+    text-shadow: var(--glow);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  /* Progress bar */
+  .progress-bar-wrap {
+    height: 8px;
+    background: rgba(74, 144, 226, 0.1);
+    border: 1px solid rgba(74, 144, 226, 0.2);
+    border-radius: 0;
+    position: relative;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--blue-dim), var(--blue), var(--cyan));
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.8);
+    transition: width 0.3s ease;
+    position: relative;
+  }
+
+  .progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 30px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6));
+    animation: shimmer 0.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Segment ticks on progress bar */
+  .progress-ticks {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: space-evenly;
+    align-items: stretch;
+    pointer-events: none;
+  }
+  .tick {
+    width: 1px;
+    background: rgba(74, 144, 226, 0.3);
+  }
+
+  /* Log lines */
+  .log-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 100px;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    opacity: 0;
+    transform: translateX(-10px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+
+  .log-line.visible {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .log-time { color: rgba(74, 144, 226, 0.5); min-width: 65px; }
+  .log-tag { color: var(--cyan); min-width: 80px; }
+  .log-msg { color: var(--text-bright); flex: 1; }
+  .log-ok { color: #4ade80; min-width: 20px; }
+  .log-ok.fail { color: #f87171; }
+  .log-ok.warn { color: #facc15; }
+
+  /* Mini stat panels */
+  .stats-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    animation: fadeUp 0.8s ease-out 0.9s forwards;
+    opacity: 0;
+  }
+
+  .stat-box {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-box::before {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--blue), transparent);
+    animation: statScan 3s ease-in-out infinite;
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  .stat-box:nth-child(2)::before { animation-delay: 0.5s; }
+  .stat-box:nth-child(3)::before { animation-delay: 1s; }
+  .stat-box:nth-child(4)::before { animation-delay: 1.5s; }
+
+  @keyframes statScan {
+    0% { transform: scaleX(0); transform-origin: left; }
+    50% { transform: scaleX(1); transform-origin: left; }
+    51% { transform: scaleX(1); transform-origin: right; }
+    100% { transform: scaleX(0); transform-origin: right; }
+  }
+
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--text);
+    text-transform: uppercase;
+    opacity: 0.6;
+    margin-bottom: 4px;
+  }
+
+  .stat-val {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--blue-bright);
+  }
+
+  .stat-unit {
+    font-size: 9px;
+    color: var(--text);
+    margin-left: 2px;
+  }
+
+  /* Radar circle (decorative) */
+  .radar {
+    position: fixed;
+    bottom: 80px; right: 90px;
+    width: 120px; height: 120px;
+    z-index: 5;
+    opacity: 0.5;
+  }
+
+  .radar-circle {
+    position: absolute;
+    top: 50%; left: 50%;
+    border-radius: 50%;
+    border: 1px solid rgba(74, 144, 226, 0.3);
+    transform: translate(-50%, -50%);
+  }
+  .radar-circle:nth-child(1) { width: 30px; height: 30px; }
+  .radar-circle:nth-child(2) { width: 60px; height: 60px; }
+  .radar-circle:nth-child(3) { width: 90px; height: 90px; }
+  .radar-circle:nth-child(4) { width: 120px; height: 120px; }
+
+  .radar-line {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 50%; height: 1px;
+    background: linear-gradient(90deg, rgba(0, 212, 255, 0.8), transparent);
+    transform-origin: left center;
+    animation: radarSpin 4s linear infinite;
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  }
+
+  @keyframes radarSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .radar-dot {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan);
+  }
+  .radar-dot:nth-child(3) { top: 25%; left: 65%; }
+  .radar-dot:nth-child(4) { top: 65%; left: 30%; }
+  .radar-dot:nth-child(5) { top: 45%; left: 75%; animation: radarBlip 2s ease-in-out infinite; }
+
+  @keyframes radarBlip {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.2; transform: scale(0.5); }
+  }
+
+  /* Side data stream */
+  .data-stream {
+    position: fixed;
+    left: 30px; top: 140px;
+    font-size: 9px;
+    color: rgba(74, 144, 226, 0.3);
+    line-height: 1.8;
+    z-index: 5;
+    letter-spacing: 1px;
+    width: 40px;
+    overflow: hidden;
+  }
+
+  .stream-col {
+    animation: streamFall 3s linear infinite;
+  }
+  .stream-col:nth-child(2) { animation-delay: 1s; color: rgba(0, 212, 255, 0.2); }
+  .stream-col:nth-child(3) { animation-delay: 2s; }
+
+  @keyframes streamFall {
+    0% { opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Completion state */
+  .completion-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(74, 144, 226, 0.05);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+  }
+
+  .completion-overlay.show {
+    opacity: 1;
+    pointer-events: all;
+    animation: completionPulse 0.5s ease-out;
+  }
+
+  @keyframes completionPulse {
+    0% { background: rgba(74, 144, 226, 0.3); }
+    100% { background: rgba(74, 144, 226, 0.05); }
+  }
+
+  .complete-msg {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 8px;
+    text-shadow: var(--glow-cyan);
+    text-align: center;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s;
+  }
+
+  .completion-overlay.show .complete-msg {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Hex decorations */
+  .hex-decoration {
+    position: fixed;
+    z-index: 3;
+    opacity: 0.15;
+  }
+  .hex-decoration svg { fill: none; stroke: var(--blue); stroke-width: 1; }
+  .hex-decoration.h1 { top: 15%; left: 8%; }
+  .hex-decoration.h2 { bottom: 20%; right: 7%; transform: scale(0.6); }
+
+  /* Animated number counter in stats */
+  .stat-counter { transition: all 0.3s ease; }
+
+  /* Version tag */
+  .version-tag {
+    position: fixed;
+    bottom: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    letter-spacing: 4px;
+    color: rgba(74, 144, 226, 0.3);
+    z-index: 5;
+  }
+
+  /* Top HUD info */
+  .hud-info {
+    position: fixed;
+    top: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    letter-spacing: 4px;
+    color: rgba(74, 144, 226, 0.4);
+    z-index: 5;
+    display: flex;
+    gap: 30px;
+  }
+</style>
+</head>
+<body>
+
+<div class="scanlines"></div>
+<div class="scan-beam"></div>
+
+<!-- Corners -->
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+<!-- HUD lines -->
+<div class="hud-line top"></div>
+<div class="hud-line bottom"></div>
+<div class="hud-line left"></div>
+<div class="hud-line right"></div>
+
+<!-- Top HUD -->
+<div class="hud-info">
+  <span id="hud-time">00:00:00</span>
+  <span>NABU CORE v4.1</span>
+  <span id="hud-date">--</span>
+</div>
+
+<!-- Hex decorations -->
+<div class="hex-decoration h1">
+  <svg width="80" height="92" viewBox="0 0 80 92"><polygon points="40,1 79,21 79,71 40,91 1,71 1,21"/></svg>
+</div>
+<div class="hex-decoration h2">
+  <svg width="120" height="138" viewBox="0 0 80 92"><polygon points="40,1 79,21 79,71 40,91 1,71 1,21"/></svg>
+</div>
+
+<!-- Data stream -->
+<div class="data-stream">
+  <div class="stream-col" id="stream1"></div>
+</div>
+
+<!-- Radar -->
+<div class="radar">
+  <div class="radar-circle"></div>
+  <div class="radar-circle"></div>
+  <div class="radar-circle"></div>
+  <div class="radar-circle"></div>
+  <div class="radar-line"></div>
+  <div class="radar-dot"></div>
+  <div class="radar-dot"></div>
+</div>
+
+<!-- Main content -->
+<div class="container">
+  <!-- Logo -->
+  <div class="logo-wrap">
+    <div class="orbit-ring r1"></div>
+    <div class="orbit-ring r2"></div>
+    <svg class="logo-svg" viewBox="0 0 160 195" xmlns="http://www.w3.org/2000/svg">
+      <!-- NABU logo: top triangle + bottom right-pointing triangle like the "4" shape -->
+      <!-- Top triangle: from top center down to crossbar -->
+      <polyline 
+        points="110,15 110,115 20,115"
+        fill="none" 
+        stroke="#4a90e2" 
+        stroke-width="8" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+      />
+      <!-- Left slanted line from top of triangle -->
+      <line x1="110" y1="15" x2="30" y2="115" stroke="#4a90e2" stroke-width="8" stroke-linecap="round"/>
+      <!-- Vertical line continuing down from crossbar -->
+      <line x1="110" y1="15" x2="110" y2="185" stroke="#4a90e2" stroke-width="8" stroke-linecap="round"/>
+      <!-- Bottom triangle: pointing right -->
+      <polyline 
+        points="30,115 110,185 145,150"
+        fill="none"
+        stroke="#4a90e2"
+        stroke-width="8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <!-- Close the bottom shape -->
+      <line x1="30" y1="115" x2="145" y2="150" stroke="none"/>
+    </svg>
+  </div>
+
+  <!-- Title -->
+  <div class="title-block">
+    <div class="title">NABU</div>
+    <div class="subtitle">Neural Autonomous Behavioral Unit</div>
+  </div>
+
+  <!-- Progress panel -->
+  <div class="progress-panel">
+    <div class="panel-corner tl"></div>
+    <div class="panel-corner br"></div>
+
+    <div class="status-label">
+      <div class="status-dot"></div>
+      <div class="status-text" id="status-text">Initializing boot sequence...</div>
+      <div class="status-pct"><span id="pct-display">0</span>%</div>
+    </div>
+
+    <div class="progress-bar-wrap">
+      <div class="progress-ticks">
+        <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+        <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+        <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+      </div>
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+
+    <div class="log-area" id="log-area"></div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row">
+    <div class="stat-box">
+      <div class="stat-label">Neural Load</div>
+      <div class="stat-val"><span class="stat-counter" id="stat-neural">0</span><span class="stat-unit">%</span></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Memory</div>
+      <div class="stat-val"><span class="stat-counter" id="stat-mem">0.0</span><span class="stat-unit">TB</span></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Sync Rate</div>
+      <div class="stat-val"><span class="stat-counter" id="stat-sync">0</span><span class="stat-unit">Hz</span></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Core Temp</div>
+      <div class="stat-val"><span class="stat-counter" id="stat-temp">0</span><span class="stat-unit">°K</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Completion overlay -->
+<div class="completion-overlay" id="completion">
+  <div class="complete-msg">NABU ONLINE<br><span style="font-size:12px;letter-spacing:6px;opacity:0.7">SYSTEMS NOMINAL</span></div>
+</div>
+
+<!-- Version -->
+<div class="version-tag">BUILD 4.1.0-ALPHA · SECURE CHANNEL ACTIVE</div>
+
+<script>
+  const TOTAL_MS = 12000;
+
+  const bootSteps = [
+    { at: 0,    pct: 2,  tag: 'BIOS',    msg: 'Hardware interface layer initialized',       ok: '✓' },
+    { at: 600,  pct: 8,  tag: 'KERNEL',  msg: 'Loading core kernel modules...',              ok: '✓' },
+    { at: 1100, pct: 15, tag: 'MEMORY',  msg: 'Allocating neural memory blocks (4.7 TB)',    ok: '✓' },
+    { at: 1700, pct: 24, tag: 'CRYPT',   msg: 'Decrypting cognitive architecture...',        ok: '✓' },
+    { at: 2300, pct: 32, tag: 'SENSOR',  msg: 'Calibrating environmental sensors',           ok: '✓' },
+    { at: 2900, pct: 41, tag: 'MATRIX',  msg: 'Assembling reasoning matrix [256 layers]',   ok: '✓' },
+    { at: 3500, pct: 48, tag: 'LANG',    msg: 'Language codec online — 4,210 dialects',     ok: '✓' },
+    { at: 4200, pct: 56, tag: 'ETHIC',   msg: 'Loading ethics constraint engine',            ok: '✓' },
+    { at: 4900, pct: 63, tag: 'NET',     msg: 'Establishing secure uplink [AES-512]',        ok: '✓' },
+    { at: 5600, pct: 70, tag: 'SYNC',    msg: 'Synchronizing quantum state registers',       ok: '✓' },
+    { at: 6400, pct: 77, tag: 'CONTEXT', msg: 'World model context loaded (329B params)',    ok: '✓' },
+    { at: 7200, pct: 83, tag: 'VOICE',   msg: 'Speech synthesis module online',              ok: '✓' },
+    { at: 8000, pct: 89, tag: 'AUTH',    msg: 'Operator authentication confirmed',           ok: '✓' },
+    { at: 8800, pct: 94, tag: 'DIAG',    msg: 'Running final system diagnostics',            ok: '✓' },
+    { at: 9600, pct: 98, tag: 'READY',   msg: 'All subsystems nominal — NABU standing by',  ok: '✓' },
+    { at:10500, pct:100, tag: 'ONLINE',  msg: 'Boot complete. Awaiting operator input.',     ok: '✓' },
+  ];
+
+  const startTime = Date.now();
+  let currentPct = 0;
+  let stepIndex = 0;
+
+  // HUD clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('hud-time').textContent =
+      now.toTimeString().slice(0,8);
+    document.getElementById('hud-date').textContent =
+      now.toLocaleDateString('en-US', { year:'numeric', month:'2-digit', day:'2-digit' });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // Data stream
+  const chars = '01001101001110010100ABCDEF4719';
+  function streamTick() {
+    const el = document.getElementById('stream1');
+    let s = '';
+    for (let i = 0; i < 20; i++) {
+      s += chars[Math.floor(Math.random() * chars.length)] + '\n';
+    }
+    el.textContent = s;
+  }
+  setInterval(streamTick, 120);
+
+  // Animated stats
+  let statTargets = { neural: 0, mem: 0, sync: 0, temp: 0 };
+  let statCurrent = { neural: 0, mem: 0, sync: 0, temp: 0 };
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function animateStats() {
+    statCurrent.neural = lerp(statCurrent.neural, statTargets.neural, 0.05);
+    statCurrent.mem    = lerp(statCurrent.mem,    statTargets.mem,    0.04);
+    statCurrent.sync   = lerp(statCurrent.sync,   statTargets.sync,   0.06);
+    statCurrent.temp   = lerp(statCurrent.temp,   statTargets.temp,   0.05);
+
+    document.getElementById('stat-neural').textContent = Math.round(statCurrent.neural);
+    document.getElementById('stat-mem').textContent    = statCurrent.mem.toFixed(1);
+    document.getElementById('stat-sync').textContent   = Math.round(statCurrent.sync);
+    document.getElementById('stat-temp').textContent   = Math.round(statCurrent.temp);
+
+    requestAnimationFrame(animateStats);
+  }
+  animateStats();
+
+  // Smooth percentage counter
+  let displayPct = 0;
+  function animatePct() {
+    displayPct = lerp(displayPct, currentPct, 0.04);
+    document.getElementById('pct-display').textContent = Math.round(displayPct);
+    document.getElementById('progress-fill').style.width = displayPct + '%';
+    requestAnimationFrame(animatePct);
+  }
+  animatePct();
+
+  // Log line creation
+  function addLog(step) {
+    const area = document.getElementById('log-area');
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.innerHTML = `
+      <span class="log-time">[${elapsed}s]</span>
+      <span class="log-tag">${step.tag.padEnd(7)}</span>
+      <span class="log-msg">${step.msg}</span>
+      <span class="log-ok">${step.ok}</span>
+    `;
+    area.appendChild(div);
+
+    // Animate in
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { div.classList.add('visible'); });
+    });
+
+    // Keep only last 5
+    const lines = area.querySelectorAll('.log-line');
+    if (lines.length > 5) {
+      lines[0].style.opacity = '0';
+      lines[0].style.transform = 'translateX(-10px)';
+      setTimeout(() => lines[0].remove(), 400);
+    }
+
+    // Scroll to bottom
+    area.scrollTop = area.scrollHeight;
+  }
+
+  // Main boot tick
+  function tick() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / TOTAL_MS, 1);
+
+    // Check for step triggers
+    while (stepIndex < bootSteps.length && elapsed >= bootSteps[stepIndex].at) {
+      const step = bootSteps[stepIndex];
+      currentPct = step.pct;
+
+      // Update status text
+      document.getElementById('status-text').textContent = step.msg;
+
+      // Add log
+      addLog(step);
+
+      // Update stat targets
+      statTargets.neural = Math.min(100, step.pct * 1.1);
+      statTargets.mem    = (step.pct / 100) * 4.7;
+      statTargets.sync   = Math.round((step.pct / 100) * 1420);
+      statTargets.temp   = Math.round(120 + (step.pct / 100) * 180);
+
+      stepIndex++;
+    }
+
+    if (elapsed < TOTAL_MS) {
+      requestAnimationFrame(tick);
+    } else {
+      // Completion
+      currentPct = 100;
+      statTargets = { neural: 100, mem: 4.7, sync: 1420, temp: 298 };
+      document.getElementById('status-text').textContent = 'Boot complete. NABU is online.';
+
+      setTimeout(() => {
+        const overlay = document.getElementById('completion');
+        overlay.classList.add('show');
+      }, 600);
+    }
+  }
+
+  // Start after a brief moment
+  setTimeout(tick, 300);
+</script>
+</body>
+</html>
